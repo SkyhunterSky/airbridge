@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+  <html lang="en">
+  <head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <title>AirBridge - send files between iPhone and Android</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <style>
+  :root{
+  --bg:#0f1115;
+--panel:#171a21;
+--panel2:#1f232c;
+--accent:#5b8cff;
+--accent2:#7c5bff;
+--text:#eef0f5;
+  --muted:#9aa1af;
+--good:#37c98e;
+--warn:#f0b73c;
+  --radius:16px;
+}
+*{box-sizing:border-box}
+body{
+  margin:0;
+font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+background:linear-gradient(180deg,#0f1115,#14171f 60%);
+color:var(--text);
+min-height:100vh;
+display:flex;
+justify-content:center;
+}
+.app{
+  width:100%;
+max-width:480px;
+padding:24px 18px 60px;
+}
+header{
+  text-align:center;
+margin-bottom:22px;
+}
+header h1{
+  font-size:22px;
+margin:0 0 4px;
+background:linear-gradient(90deg,var(--accent),var(--accent2));
+-webkit-background-clip:text;
+background-clip:text;
+color:transparent;
+}
+header p{
+  margin:0;
+color:var(--muted);
+font-size:13.5px;
+}
+.card{
+background:var(--panel);
+border:1px solid #262b36;
+border-radius:var(--radius);
+padding:20px;
+margin-bottom:16px;
+}
+.choice-row{
+  display:grid;
+grid-template-columns:1fr 1fr;
+gap:12px;
+}
+.choice-btn{
+  background:var(--panel2);
+border:1px solid #2a2f3a;
+border-radius:var(--radius);
+padding:22px 12px;
+color:var(--text);
+font-size:16px;
+font-weight:600;
+cursor:pointer;
+display:flex;
+flex-direction:column;
+align-items:center;
+gap:8px;
+transition:transform .1s ease, border-color .15s ease;
+}
+.choice-btn:active{transform:scale(0.97)}
+.choice-btn:hover{border-color:var(--accent)}
+.choice-btn .emoji{font-size:30px}
+.hidden{display:none !important}
+button.primary{
+width:100%;
+padding:14px;
+border:none;
+border-radius:12px;
+background:linear-gradient(90deg,var(--accent),var(--accent2));
+color:white;
+font-size:15px;
+font-weight:600;
+cursor:pointer;
+}
+button.primary:disabled{opacity:.5;cursor:default}
+button.secondary{
+width:100%;
+padding:12px;
+border-radius:12px;
+border:1px solid #2a2f3a;
+background:transparent;
+color:var(--text);
+font-size:14px;
+cursor:pointer;
+margin-top:8px;
+}
+input[type=text]{
+width:100%;
+padding:14px;
+border-radius:12px;
+border:1px solid #2a2f3a;
+background:var(--panel2);
+color:var(--text);
+font-size:20px;
+text-align:center;
+letter-spacing:4px;
+text-transform:uppercase;
+}
+.filepick{
+border:2px dashed #333a48;
+border-radius:14px;
+padding:26px 14px;
+text-align:center;
+color:var(--muted);
+cursor:pointer;
+  margin-bottom:14px;
+                  }
+.filepick:hover{border-color:var(--accent)}
+  #fileInput{display:none}
+.filelist{margin:10px 0 16px;font-size:13.5px;color:var(--muted)}
+.filelist div{padding:4px 0;border-bottom:1px solid #232833;display:flex;justify-content:space-between;gap:8px}
+
+.code-display{
+text-align:center;
+margin:6px 0 16px;
+}
+.code-display .code{
+font-size:38px;
+font-weight:700;
+letter-spacing:6px;
+background:linear-gradient(90deg,var(--accent),var(--accent2));
+-webkit-background-clip:text;
+background-clip:text;
+color:transparent;
+}
+#qrbox{display:flex;justify-content:center;margin:14px 0}
+#qrbox canvas, #qrbox img{border-radius:12px;background:#fff;padding:8px}
+.status-line{
+display:flex;
+align-items:center;
+gap:10px;
+font-size:14px;
+color:var(--muted);
+margin:10px 0;
+}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--muted);flex:none}
+.dot.active{background:var(--accent);box-shadow:0 0 0 4px rgba(91,140,255,.15)}
+.dot.good{background:var(--good)}
+.dot.warn{background:var(--warn)}
+.progress-wrap{margin:10px 0}
+.progress-item{margin-bottom:12px}
+.progress-item .meta{display:flex;justify-content:space-between;font-size:12.5px;color:var(--muted);margin-bottom:4px}
+.bar-track{height:8px;border-radius:5px;background:#262b36;overflow:hidden}
+.bar-fill{height:100%;background:linear-gradient(90deg,var(--accent),var(--accent2));width:0%;transition:width .15s ease}
+.received-item{
+display:flex;
+justify-content:space-between;
+align-items:center;
+background:var(--panel2);
+border-radius:12px;
+padding:12px;
+margin-bottom:10px;
+gap:10px;
+         }
+.received-item .name{font-size:13.5px;word-break:break-all}
+.received-item .size{color:var(--muted);font-size:12px}
+.received-item a{
+  background:var(--good);
+color:#04241a;
+text-decoration:none;
+font-weight:700;
+font-size:13px;
+padding:8px 12px;
+border-radius:9px;
+white-space:nowrap;
+}
+.tag{
+  display:inline-block;
+font-size:11px;
+font-weight:700;
+letter-spacing:.5px;
+padding:3px 8px;
+border-radius:999px;
+margin-bottom:10px;
+         }
+.tag.p2p{background:rgba(55,201,142,.15);color:var(--good)}
+.tag.relay{background:rgba(240,183,60,.15);color:var(--warn)}
+.back-link{color:var(--muted);font-size:13px;text-align:center;display:block;margin-top:10px;cursor:pointer}
+</style>
+  </head>
+  <body>
+  <div class="app">
+  <header>
+  <h1>AirBridge</h1>
+  <p>Send photos, videos and files between iPhone and Android - no app install.</p>
+</header>
+
+<!-- HOME -->
+<div id="screen-home" class="card">
+  <div class="choice-row">
+  <div class="choice-btn" id="btnSend">
+  <span class="emoji">Send</span>
+  </div>
+  <div class="choice-btn" id="btnReceive">
+  <span class="emoji">Receive</span>
+  </div>
+  </div>
+  </div>
+
+  <!-- SEND: pick files -->
+  <div id="screen-send-pick" class="card hidden">
+  <div class="filepick" id="filepick">
+  <div style="font-size:28px;margin-bottom:6px">+</div>
+  Tap to choose photos, videos, or any files
+</div>
+<input type="file" id="fileInput" multiple>
+<div class="filelist" id="fileList"></div>
+  <button class="primary" id="btnStartSend" disabled>Create send code</button>
+<span class="back-link" id="backFromPick">Back</span>
+</div>
+
+<!-- SEND: waiting / transferring -->
+<div id="screen-send-wait" class="card hidden">
+  <div class="code-display">
+  <div class="code" id="sendCode">------</div>
+  </div>
+  <div id="qrbox"></div>
+  <div class="status-line"><span class="dot active" id="sendDot"></span><span id="sendStatusText">Waiting for the other device to join...</span></div>
+  <div id="sendProgress" class="progress-wrap hidden"></div>
+  <span class="back-link" id="cancelSend">Cancel</span>
+  </div>
+
+  <!-- RECEIVE: enter code -->
+  <div id="screen-recv-join" class="card hidden">
+  <p style="color:var(--muted);font-size:13.5px;margin-top:0">Enter the 6-character code shown on the sender's screen, or scan their QR code with your camera app.</p>
+  <input type="text" id="codeInput" maxlength="6" placeholder="CODE">
+  <button class="primary" id="btnJoin" style="margin-top:14px">Connect</button>
+  <span class="back-link" id="backFromJoin">Back</span>
+  </div>
+
+  <!-- RECEIVE: waiting / receiving -->
+  <div id="screen-recv-wait" class="card hidden">
+  <div class="status-line"><span class="dot active" id="recvDot"></span><span id="recvStatusText">Connected. Waiting for sender to start...</span></div>
+  <div id="recvProgress" class="progress-wrap hidden"></div>
+  <div id="recvFiles"></div>
+  <span class="back-link" id="cancelRecv">Start over</span>
+  </div>
+
+  </div>
+  <script src="/app.js"></script>
+  </body>
+  </html>
+  

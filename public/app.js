@@ -79,9 +79,16 @@
   let p2pTimer = null;
   let p2pSucceeded = false;
 
-  // File pickers (especially iOS Photos, for large/iCloud videos) can take a
-  // long time to hand a File back to the page after the user taps a video,
-  // with zero native progress feedback. Without a loading state here that
+  // #fileInput is restricted to accept="image/*,video/*". On iOS/Android this
+  // makes the browser open the lightweight native media picker (PHPicker /
+  // Android Photo Picker) directly, instead of the generic "Photo Library /
+  // Take Photo / Browse" action sheet — that generic sheet, and the
+  // full file-system browser behind "Browse", are what make attaching feel
+  // slow even for small files. #fileInputOther (no accept restriction) is a
+  // fallback for anything that isn't a photo or video.
+  //
+  // Even with the fast picker, large/iCloud videos can still take a moment
+  // to hand back to the page, with zero native progress feedback — that
   // looks exactly like the page is frozen. This block shows a "preparing"
   // state as soon as the browser returns focus to the tab, and a reassuring
   // note if it's still not resolved a few seconds later — and gives up
@@ -97,8 +104,8 @@
     if (pickerNoteTimer) clearTimeout(pickerNoteTimer);
     if (pickerGiveUpTimer) clearTimeout(pickerGiveUpTimer);
     $('filepick').classList.remove('processing');
-    $('filepickHint').textContent = 'Tap to choose files';
-    $('filepickSubhint').textContent = 'Photos, videos, or anything else';
+    $('filepickHint').textContent = 'Tap to choose photos or videos';
+    $('filepickSubhint').textContent = 'Opens the fast picker';
     $('filepickNote').classList.remove('visible');
   }
 
@@ -112,6 +119,7 @@
     sendPC = null; sendDC = null;
     $('fileList').innerHTML = '';
     $('fileInput').value = '';
+    $('fileInputOther').value = '';
     $('btnStartSend').disabled = true;
     $('sendProgress').classList.add('hidden');
     $('sendProgress').innerHTML = '';
@@ -119,10 +127,13 @@
     clearPickerProcessingUI();
   }
 
-  $('filepick').onclick = () => {
+  function openPicker(input) {
     pickerPending = true;
-    $('fileInput').click();
-  };
+    input.click();
+  }
+
+  $('filepick').onclick = () => openPicker($('fileInput'));
+  $('chooseOtherLink').onclick = () => openPicker($('fileInputOther'));
 
   // The tab loses focus while the native picker is open and regains it once
   // the user finishes (picks a file OR cancels). If onchange hasn't already
@@ -146,9 +157,9 @@
     }, 400); // short grace period so a fast pick never flashes this state
   });
 
-  $('fileInput').onchange = e => {
+  function handleFilesPicked(fileList) {
     clearPickerProcessingUI();
-    selectedFiles = Array.from(e.target.files);
+    selectedFiles = Array.from(fileList);
     const list = $('fileList');
     list.innerHTML = '';
     selectedFiles.forEach(f => {
@@ -157,7 +168,10 @@
       list.appendChild(row);
     });
     $('btnStartSend').disabled = selectedFiles.length === 0;
-  };
+  }
+
+  $('fileInput').onchange = e => handleFilesPicked(e.target.files);
+  $('fileInputOther').onchange = e => handleFilesPicked(e.target.files);
 
   $('btnStartSend').onclick = () => {
     sendCode = genCode();

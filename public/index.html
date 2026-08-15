@@ -248,6 +248,42 @@
     padding:12px 14px;
     margin:10px 0;
   }
+  .status-line .status-text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .status-line .elapsed{
+    flex:none;
+    font-variant-numeric:tabular-nums;
+    font-weight:700;
+    font-size:11.5px;
+    color:var(--muted-dim);
+    background:var(--panel3);
+    padding:4px 9px;
+    border-radius:8px;
+    letter-spacing:.2px;
+  }
+  .toast{
+    position:fixed;
+    left:50%;
+    top:18px;
+    transform:translate(-50%,-14px);
+    background:var(--panel3);
+    border:1px solid var(--border);
+    color:var(--text);
+    padding:12px 18px;
+    border-radius:14px;
+    font-size:13.5px;
+    font-weight:600;
+    box-shadow:0 14px 30px -10px rgba(0,0,0,.6);
+    display:flex;
+    align-items:center;
+    gap:9px;
+    z-index:999;
+    opacity:0;
+    pointer-events:none;
+    transition:opacity .25s ease, transform .25s ease;
+    max-width:calc(100% - 40px);
+  }
+  .toast.visible{opacity:1;transform:translate(-50%,0)}
+  .toast .toast-dot{width:8px;height:8px;border-radius:50%;background:var(--good);flex:none}
   .dot{width:8px;height:8px;border-radius:50%;background:var(--muted-dim);flex:none;position:relative}
   .dot.active{background:var(--accent)}
   .dot.active::after{
@@ -265,12 +301,25 @@
   .dot.good{background:var(--good)}
   .dot.warn{background:var(--warn)}
   .progress-wrap{margin:14px 0 4px}
-  .progress-item{margin-bottom:14px}
+  .progress-current{
+    font-size:12px;
+    font-weight:700;
+    color:var(--muted);
+    margin:0 0 12px;
+    letter-spacing:.1px;
+  }
+  .progress-item{margin-bottom:14px;opacity:.55;transition:opacity .2s ease}
   .progress-item:last-child{margin-bottom:0}
-  .progress-item .meta{display:flex;justify-content:space-between;font-size:12.5px;color:var(--muted);margin-bottom:6px}
-  .progress-item .meta span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:70%}
+  .progress-item.active,.progress-item.done{opacity:1}
+  .progress-item .meta{display:flex;justify-content:space-between;align-items:center;font-size:12.5px;color:var(--muted);margin-bottom:6px}
+  .progress-item .meta span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:60%}
+  .progress-item .meta-right{display:flex;align-items:center;gap:6px;flex:none}
+  .status-chip{font-size:9.5px;font-weight:700;letter-spacing:.3px;text-transform:uppercase;padding:3px 7px;border-radius:999px;background:var(--panel3);color:var(--muted-dim);flex:none}
+  .progress-item.active .status-chip{background:rgba(91,140,255,.16);color:var(--accent)}
+  .progress-item.done .status-chip{background:rgba(52,211,153,.16);color:var(--good)}
   .bar-track{height:7px;border-radius:5px;background:var(--panel3);overflow:hidden}
   .bar-fill{height:100%;border-radius:5px;background:linear-gradient(90deg,var(--accent),var(--accent2));width:0%;transition:width .2s ease}
+  .progress-item.done .bar-fill{background:var(--good)}
   .received-item{
     display:flex;
     justify-content:space-between;
@@ -344,6 +393,7 @@
 </style>
 </head>
 <body>
+<div class="toast" id="toast"><span class="toast-dot"></span><span id="toastText"></span></div>
 <div class="app">
   <header>
     <div class="logo">
@@ -390,7 +440,7 @@
       <div class="code" id="sendCode">------</div>
     </div>
     <div id="qrbox"></div>
-    <div class="status-line"><span class="dot active" id="sendDot"></span><span id="sendStatusText">Waiting for the other device to join…</span></div>
+    <div class="status-line"><span class="dot active" id="sendDot"></span><span class="status-text" id="sendStatusText">Waiting for the other device to join…</span><span class="elapsed" id="sendElapsed">0:00</span></div>
     <div id="sendProgress" class="progress-wrap hidden"></div>
     <span class="back-link" id="cancelSend">Cancel</span>
   </div>
@@ -405,7 +455,7 @@
 
   <!-- RECEIVE: waiting / receiving -->
   <div id="screen-recv-wait" class="card hidden">
-    <div class="status-line"><span class="dot active" id="recvDot"></span><span id="recvStatusText">Connected. Waiting for sender to start…</span></div>
+    <div class="status-line"><span class="dot active" id="recvDot"></span><span class="status-text" id="recvStatusText">Joining room…</span><span class="elapsed" id="recvElapsed">0:00</span></div>
     <div id="recvProgress" class="progress-wrap hidden"></div>
     <div id="recvFiles"></div>
     <span class="back-link" id="cancelRecv">Start over</span>

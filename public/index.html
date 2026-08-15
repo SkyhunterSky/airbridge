@@ -197,7 +197,15 @@
     line-height:1.5;
   }
   .filepick-note.visible{display:block}
-  #fileInput{display:none}
+  .filepick-alt{
+    text-align:center;
+    font-size:12.5px;
+    color:var(--muted-dim);
+    margin:-8px 0 16px;
+  }
+  .filepick-alt a{color:var(--accent);cursor:pointer;text-decoration:none}
+  .filepick-alt a:hover{text-decoration:underline}
+  #fileInput,#fileInputOther{display:none}
   .filelist{margin:0 0 16px;display:flex;flex-direction:column;gap:6px}
   .filelist div{
     padding:10px 12px;
@@ -363,11 +371,13 @@
   <div id="screen-send-pick" class="card hidden">
     <div class="filepick" id="filepick">
       <span class="icon-badge"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 12v9"/><path d="M16 16l-4-4-4 4"/><path d="M20.39 18.39A5 5 0 0018 9h-1.26A8 8 0 104 16.3"/></svg></span>
-      <div class="hint" id="filepickHint">Tap to choose files</div>
-      <div class="subhint" id="filepickSubhint">Photos, videos, or anything else</div>
+      <div class="hint" id="filepickHint">Tap to choose photos or videos</div>
+      <div class="subhint" id="filepickSubhint">Opens the fast picker</div>
     </div>
     <div class="filepick-note" id="filepickNote">Still working — large videos can take a while to prepare before they show up here. Leave this tab open.</div>
-    <input type="file" id="fileInput" multiple>
+    <div class="filepick-alt"><a id="chooseOtherLink">Sending a different kind of file?</a></div>
+    <input type="file" id="fileInput" accept="image/*,video/*" multiple>
+    <input type="file" id="fileInputOther" multiple>
     <div class="filelist" id="fileList"></div>
     <button class="primary" id="btnStartSend" disabled>Create send code</button>
     <span class="back-link" id="backFromPick"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg> Back</span>

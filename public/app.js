@@ -22,9 +22,79 @@
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' }
   ];
-  const CHUNK_SIZE = 16 * 1024;
+  // 64KB chunks (up from 16KB): fewer send()/await round-trips per file means
+  // less per-chunk overhead, which matters most on mobile — this alone
+  // noticeably speeds up multi-minute video transfers.
+  const CHUNK_SIZE = 64 * 1024;
   const P2P_TIMEOUT_MS = 9000;
-  const BACKPRESSURE_LIMIT = 8 * 1024 * 1024;
+  // High/low water marks for datachannel backpressure. We let the buffer
+  // fill up to BACKPRESSURE_HIGH before pausing, then resume the instant the
+  // browser fires 'bufferedamountlow' (buffer back under BACKPRESSURE_LOW) —
+  // event-driven, instead of the old fixed 30ms poll loop which could leave
+  // the channel idle for stretches even after it was ready for more data.
+  const BACKPRESSURE_HIGH = 16 * 1024 * 1024;
+  const BACKPRESSURE_LOW = 1 * 1024 * 1024;
+
+  function waitForBufferedAmountLow(dc) {
+    if (dc.bufferedAmount <= BACKPRESSURE_HIGH) return Promise.resolve();
+    return new Promise(resolve => {
+      dc.bufferedAmountLowThreshold = BACKPRESSURE_LOW;
+      // 'bufferedamountlow' only fires on a future transition across the
+      // threshold — if the buffer already drained below it by the time we
+      // set it (between the check above and here), no event will ever come
+      // and we'd hang forever. Re-check once more before committing to the
+      // event wait.
+      if (dc.bufferedAmount <= BACKPRESSURE_LOW) { resolve(); return; }
+      const onLow = () => { dc.removeEventListener('bufferedamountlow', onLow); resolve(); };
+      dc.addEventListener('bufferedamountlow', onLow);
+    });
+  }
+
+  // ---------- elapsed-time stopwatch (used on both wait/transfer screens) ----------
+  function fmtElapsed(ms) {
+    const totalSec = Math.max(0, Math.floor(ms / 1000));
+    const m = Math.floor(totalSec / 60);
+    const s = totalSec % 60;
+    return `${m}:${String(s).padStart(2, '0')}`;
+  }
+  function makeStopwatch(elementId) {
+    let handle = null, start = null;
+    return {
+      start() {
+        this.stop();
+        start = Date.now();
+        const el = $(elementId);
+        if (el) el.textContent = '0:00';
+        handle = setInterval(() => {
+          const el2 = $(elementId);
+          if (el2) el2.textContent = fmtElapsed(Date.now() - start);
+        }, 1000);
+      },
+      stop() {
+        if (handle) clearInterval(handle);
+        handle = null;
+      },
+      reset() {
+        this.stop();
+        const el = $(elementId);
+        if (el) el.textContent = '0:00';
+      }
+    };
+  }
+  const sendStopwatch = makeStopwatch('sendElapsed');
+  const recvStopwatch = makeStopwatch('recvElapsed');
+
+  // ---------- toast popup (e.g. "both devices connected") ----------
+  let toastTimer = null;
+  function showToast(message) {
+    const el = $('toast');
+    const txt = $('toastText');
+    if (!el || !txt) return;
+    txt.textContent = message;
+    el.classList.add('visible');
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.classList.remove('visible'), 3000);
+  }
 
   const FILE_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>';
   const DOWNLOAD_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M5 21h14"/></svg>';
@@ -124,6 +194,7 @@
     $('sendProgress').classList.add('hidden');
     $('sendProgress').innerHTML = '';
     $('qrbox').innerHTML = '';
+    sendStopwatch.reset();
     clearPickerProcessingUI();
   }
 
@@ -183,11 +254,19 @@
     $('sendDot').className = 'dot active';
     $('sendStatusText').textContent = 'Waiting for the other device to join…';
     showScreen('screen-send-wait');
+    sendStopwatch.start();
 
     const s = ensureSocket();
     s.emit('join', { code: sendCode });
     s.off('peer-joined');
     s.on('peer-joined', () => startP2PAsSender());
+    // Server confirms this once BOTH sides are in the room — fires for
+    // sender and receiver at the same moment, so this is a reliable signal
+    // to surface a "connected" notification (rather than each side guessing
+    // independently, which is what caused the sender/receiver status text
+    // to drift out of sync before).
+    s.off('both-connected');
+    s.on('both-connected', () => showToast('Connected! Both devices are online.'));
     s.off('signal');
     s.on('signal', async ({ data }) => {
       if (!sendPC) return;
@@ -228,13 +307,40 @@
   function buildProgressUI(container, files) {
     container.innerHTML = '';
     container.classList.remove('hidden');
+    const header = document.createElement('div');
+    header.className = 'progress-current';
+    header.id = 'progressCurrentLabel';
+    container.appendChild(header);
     files.forEach((f, i) => {
       const item = document.createElement('div');
       item.className = 'progress-item';
+      item.id = `progress-item-${i}`;
       item.innerHTML = `
-        <div class="meta"><span>${f.name}</span><span id="pct-${i}">0%</span></div>
+        <div class="meta"><span>${f.name}</span><span class="meta-right"><span class="status-chip" id="chip-${i}">Queued</span><span id="pct-${i}">0%</span></span></div>
         <div class="bar-track"><div class="bar-fill" id="bar-${i}"></div></div>`;
       container.appendChild(item);
+    });
+    setActiveFile(files, 0);
+  }
+
+  // Marks which file (by index) is currently transferring so the UI makes
+  // it obvious what's happening first when multiple files are queued up,
+  // instead of showing several 0%-100% bars with no indication of order.
+  function setActiveFile(files, index) {
+    const label = $('progressCurrentLabel');
+    if (label) {
+      label.textContent = index < files.length
+        ? `Sending file ${index + 1} of ${files.length} — ${files[index].name}`
+        : `All ${files.length} file${files.length === 1 ? '' : 's'} sent`;
+    }
+    files.forEach((f, i) => {
+      const item = $(`progress-item-${i}`);
+      const chip = $(`chip-${i}`);
+      if (!item || !chip) return;
+      item.classList.remove('active', 'done');
+      if (i < index) { item.classList.add('done'); chip.textContent = 'Sent'; }
+      else if (i === index) { item.classList.add('active'); chip.textContent = 'Sending…'; }
+      else { chip.textContent = 'Queued'; }
     });
   }
 
@@ -249,14 +355,13 @@
 
     for (let i = 0; i < selectedFiles.length; i++) {
       const file = selectedFiles[i];
+      setActiveFile(selectedFiles, i);
       sendDC.send(JSON.stringify({ type: 'meta', index: i, total: selectedFiles.length, name: file.name, size: file.size, mime: file.type }));
       let offset = 0;
       while (offset < file.size) {
         const slice = file.slice(offset, offset + CHUNK_SIZE);
         const buf = await slice.arrayBuffer();
-        while (sendDC.bufferedAmount > BACKPRESSURE_LIMIT) {
-          await new Promise(r => setTimeout(r, 30));
-        }
+        await waitForBufferedAmountLow(sendDC);
         sendDC.send(buf);
         offset += buf.byteLength;
         const pct = Math.round((offset / file.size) * 100);
@@ -266,7 +371,9 @@
       sendDC.send(JSON.stringify({ type: 'file-end', index: i }));
     }
     sendDC.send(JSON.stringify({ type: 'all-done' }));
+    setActiveFile(selectedFiles, selectedFiles.length);
     $('sendStatusText').textContent = 'All files sent!';
+    sendStopwatch.stop();
   }
 
   function fallbackToRelay() {
@@ -285,9 +392,12 @@
   function uploadFilesSequentially(index) {
     if (index >= selectedFiles.length) {
       socket.emit('relay-done', { code: sendCode });
+      setActiveFile(selectedFiles, selectedFiles.length);
       $('sendStatusText').textContent = 'Uploaded. Waiting for the other device to download…';
+      sendStopwatch.stop();
       return;
     }
+    setActiveFile(selectedFiles, index);
     const file = selectedFiles[index];
     const qs = `name=${encodeURIComponent(file.name)}&type=${encodeURIComponent(file.type || 'application/octet-stream')}`;
     const xhr = new XMLHttpRequest();
@@ -341,6 +451,7 @@
     $('recvProgress').classList.add('hidden');
     $('recvProgress').innerHTML = '';
     $('recvFiles').innerHTML = '';
+    recvStopwatch.reset();
   }
 
   $('btnJoin').onclick = () => joinRoom($('codeInput').value.trim().toUpperCase());
@@ -349,10 +460,21 @@
     if (!code || code.length < 4) return;
     recvCode = code;
     showScreen('screen-recv-wait');
-    $('recvStatusText').textContent = 'Connected. Waiting for sender to start…';
+    // Honest, incremental status: don't claim "connected" until the server
+    // actually confirms the sender is present too (see 'both-connected'
+    // below) — this used to say "Connected..." immediately on joining,
+    // which could read as connected well before the sender's screen agreed.
+    $('recvStatusText').textContent = 'Joining room…';
+    recvStopwatch.start();
 
     const s = ensureSocket();
     s.emit('join', { code });
+
+    s.off('both-connected');
+    s.on('both-connected', () => {
+      $('recvStatusText').textContent = 'Connected. Waiting for sender to start…';
+      showToast('Connected! Both devices are online.');
+    });
 
     s.off('signal');
     s.on('signal', async ({ data }) => {
@@ -381,6 +503,7 @@
       $('recvStatusText').parentElement.before(tag);
       $('recvDot').className = 'dot warn';
       $('recvStatusText').textContent = 'Files ready — tap to download.';
+      recvStopwatch.stop();
       files.forEach(f => {
         const row = document.createElement('div');
         row.className = 'received-item';
@@ -411,9 +534,13 @@
           recvMeta = msg;
           recvChunks = [];
           recvReceived = 0;
+          // msg.index/msg.total come from the sender — use them so it's
+          // clear which file (of however many were selected) is currently
+          // coming through, instead of just a bare, unlabeled progress bar.
           $('recvProgress').innerHTML = `
-            <div class="progress-item">
-              <div class="meta"><span>${msg.name}</span><span id="rpct">0%</span></div>
+            <div class="progress-current">Receiving file ${msg.index + 1} of ${msg.total} — ${msg.name}</div>
+            <div class="progress-item active">
+              <div class="meta"><span>${msg.name}</span><span class="meta-right"><span class="status-chip">Receiving…</span><span id="rpct">0%</span></span></div>
               <div class="bar-track"><div class="bar-fill" id="rbar"></div></div>
             </div>`;
         } else if (msg.type === 'file-end') {
@@ -430,6 +557,7 @@
           p2pAllDone = true;
           $('recvStatusText').textContent = 'All files received!';
           $('recvProgress').classList.add('hidden');
+          recvStopwatch.stop();
         }
       } else {
         recvChunks.push(evt.data);

@@ -79,6 +79,29 @@
   let p2pTimer = null;
   let p2pSucceeded = false;
 
+  // File pickers (especially iOS Photos, for large/iCloud videos) can take a
+  // long time to hand a File back to the page after the user taps a video,
+  // with zero native progress feedback. Without a loading state here that
+  // looks exactly like the page is frozen. This block shows a "preparing"
+  // state as soon as the browser returns focus to the tab, and a reassuring
+  // note if it's still not resolved a few seconds later — and gives up
+  // automatically so the UI never stays stuck if the user cancels instead.
+  let pickerPending = false;
+  let pickerFocusTimer = null;
+  let pickerNoteTimer = null;
+  let pickerGiveUpTimer = null;
+
+  function clearPickerProcessingUI() {
+    pickerPending = false;
+    if (pickerFocusTimer) clearTimeout(pickerFocusTimer);
+    if (pickerNoteTimer) clearTimeout(pickerNoteTimer);
+    if (pickerGiveUpTimer) clearTimeout(pickerGiveUpTimer);
+    $('filepick').classList.remove('processing');
+    $('filepickHint').textContent = 'Tap to choose files';
+    $('filepickSubhint').textContent = 'Photos, videos, or anything else';
+    $('filepickNote').classList.remove('visible');
+  }
+
   function resetSendState() {
     selectedFiles = [];
     sendCode = null;
@@ -93,10 +116,38 @@
     $('sendProgress').classList.add('hidden');
     $('sendProgress').innerHTML = '';
     $('qrbox').innerHTML = '';
+    clearPickerProcessingUI();
   }
 
-  $('filepick').onclick = () => $('fileInput').click();
+  $('filepick').onclick = () => {
+    pickerPending = true;
+    $('fileInput').click();
+  };
+
+  // The tab loses focus while the native picker is open and regains it once
+  // the user finishes (picks a file OR cancels). If onchange hasn't already
+  // fired by then, the browser is still processing the selection.
+  window.addEventListener('focus', () => {
+    if (!pickerPending) return;
+    if (pickerFocusTimer) clearTimeout(pickerFocusTimer);
+    pickerFocusTimer = setTimeout(() => {
+      if (!pickerPending) return; // onchange already resolved it
+      $('filepick').classList.add('processing');
+      $('filepickHint').textContent = 'Preparing your file…';
+      $('filepickSubhint').textContent = 'Hang tight, this can take a moment';
+      pickerNoteTimer = setTimeout(() => {
+        if (pickerPending) $('filepickNote').classList.add('visible');
+      }, 6000);
+      // If the user actually cancelled the picker, no onchange will ever
+      // fire — don't leave the UI stuck in "preparing" forever.
+      pickerGiveUpTimer = setTimeout(() => {
+        if (pickerPending) clearPickerProcessingUI();
+      }, 120000);
+    }, 400); // short grace period so a fast pick never flashes this state
+  });
+
   $('fileInput').onchange = e => {
+    clearPickerProcessingUI();
     selectedFiles = Array.from(e.target.files);
     const list = $('fileList');
     list.innerHTML = '';
